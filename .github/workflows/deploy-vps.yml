@@ -1,0 +1,45 @@
+name: Deploy app and sales page to VPS
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Deploy both projects
+        env:
+          VPS_HOST: 189.24.8.86
+          VPS_USER: root
+          VPS_KEY: ${{ secrets.VPS_DEPLOY_KEY }}
+        run: |
+          set -euo pipefail
+          install -m 700 -d "$HOME/.ssh"
+          printf '%s\n' "$VPS_KEY" > "$HOME/.ssh/deploy_key"
+          chmod 600 "$HOME/.ssh/deploy_key"
+          ssh-keyscan -H "$VPS_HOST" >> "$HOME/.ssh/known_hosts"
+          ssh -i "$HOME/.ssh/deploy_key" -o IdentitiesOnly=yes "$VPS_USER@$VPS_HOST" 'bash -se' <<'REMOTE'
+          set -euo pipefail
+
+          update_volume() {
+            local source_container="$1"
+            docker run --rm --volumes-from "$source_container" alpine/git sh -c 'git -C /src fetch --all && git -C /src reset --hard origin/HEAD'
+          }
+
+          update_volume periciaprontaapp-source-1
+          update_volume periciapronta-venda-source-1
+
+          cd /docker/periciaprontaapp
+          docker compose up -d --force-recreate pericias
+
+          cd /docker/periciapronta-venda
+          docker compose up -d --force-recreate page
+          REMOTE
